@@ -17,13 +17,13 @@ parser = argparse.ArgumentParser(
 
 
 parser.add_argument("-s", "--server", default="",
-                    help="NTP server for fetching accurate time")
+                    help="NTP server for fetching accurate time. Default: ''. (Example: 'europe.pool.ntp.org')")
 parser.add_argument("-t", "--timezone", default=9 * 3600,
-                    help="timezone in seconds")
+                    help="Timezone in seconds. Default: 9 * 3600")
 parser.add_argument("-m", "--meandelta", default=5 * 60,
-                    help="mean delta time")
+                    help="Mean delta time. Default: 5 * 60")
 parser.add_argument("-M", "--maxdelta", default=30 * 60,
-                    help="mean delta time")
+                    help="Max delta time. Default: 30 * 60")
 
 args = parser.parse_args()
 
@@ -38,13 +38,13 @@ NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = args.server
 """
 タイムゾーン（GMT からのずれ[秒]）．（ランダム時計の日内スケジューリングにのみ影響）
 """
-TIMEZONE = args.timezone
+TIMEZONE = float(args.timezone)
 
 """
 「本日のランダム進み幅」の平均値[秒]．
 """
-MEAN_DELTA = args.meandelta
-MAX_DELTA = args.maxdelta
+MEAN_DELTA = float(args.meandelta)
+MAX_DELTA = float(args.maxdelta)
 assert(MEAN_DELTA < MAX_DELTA)
 
 
