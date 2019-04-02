@@ -1,14 +1,41 @@
 import datetime
+import queue
+import select
 import socket
 import struct
-import time
-import Queue
-import mutex
 import threading
-import select
+import time
+# import mutex
 
-taskQueue = Queue.Queue()
+import ntplib
+
+import numpy as np
+
+
+"""
+「正確な時刻」を取得するための NTP サーバー．
+ローカルでサーバーとクライアントを両方動かす場合のみ指定が必要．
+さもなくば，空文字列で良い（その場合はシステムの時計を参照する．）
+"""
+NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = "" 
+# NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = "europe.pool.ntp.org"
+
+"""
+タイムゾーン（GMT からのずれ[秒]）．（ランダム時計の日内スケジューリングにのみ影響）
+"""
+TIMEZONE = +9 * 3600
+
+"""
+「本日のランダム進み幅」の平均値[秒]．
+"""
+MEAN_DELTA = 5 * 60
+MAX_DELTA = 30 * 60
+assert(MEAN_DELTA < MAX_DELTA)
+
+
+taskQueue = queue.Queue()
 stopFlag = False
+
 
 def system_to_ntp_time(timestamp):
     """Convert a system time to a NTP time.
@@ -21,6 +48,7 @@ def system_to_ntp_time(timestamp):
     """
     return timestamp + NTP.NTP_DELTA
 
+
 def _to_int(timestamp):
     """Return the integral part of a timestamp.
 
@@ -31,6 +59,7 @@ def _to_int(timestamp):
     integral part
     """
     return int(timestamp)
+
 
 def _to_frac(timestamp, n=32):
     """Return the fractional part of a timestamp.
@@ -44,6 +73,7 @@ def _to_frac(timestamp, n=32):
     """
     return int(abs(timestamp - _to_int(timestamp)) * 2**n)
 
+
 def _to_time(integ, frac, n=32):
     """Return a timestamp from an integral and fractional part.
 
@@ -55,8 +85,75 @@ def _to_time(integ, frac, n=32):
     Retuns:
     timestamp
     """
-    return integ + float(frac)/2**n	
-		
+    return integ + float(frac) / 2**n
+
+
+def get_accurate_current_time():
+    """
+    正しい現在時刻を取得する．これは信頼できる時刻で，time.time() で取得できるものと同じフォーマットとする．
+    """
+    if NTP_SERVER_FOR_ACCURATE_CURRENT_TIME == "":
+        return time.time()
+    else:
+        try:
+            res = ntplib.NTPClient().request(NTP_SERVER_FOR_ACCURATE_CURRENT_TIME, version=3)
+            dt = datetime.datetime.strptime(time.ctime(res.tx_time), "%a %b %d %H:%M:%S %Y")
+            t = time.mktime(dt.timetuple()) + dt.microsecond / 1e6
+            print("time provided by NTP_SERVER_FOR_ACCURATE_CURRENT_TIME: ", t)
+            print("time provided by system (time.time()): ", time.time())
+        except ntplib.NTPException:
+            print("error while trying to connect NTP_SERVER_FOR_ACCURATE_CURRENT_TIME")
+            return None
+        return t
+
+
+def get_random_delta_of_day(seed):
+    """
+    「進み幅分布」からランダムに進み幅をサンプルする．
+    """
+    np.random.seed(seed)
+    if np.random.rand() < 0.5:
+        while 1:
+            x = -np.log(np.random.rand()) * MEAN_DELTA
+            if x < MAX_DELTA:
+                break
+        return x
+    else:
+        return 0
+
+
+def get_schedule_in_day(time_ratio_in_day):
+    """
+    日内スケジュール．
+    """
+    x = time_ratio_in_day
+    if x < 0.25:
+        return x / 0.25
+    elif x < 0.5:
+        return 1.0
+    elif x < 0.75:
+        return 3.0 - x / 0.25
+    else:
+        return 0.0
+
+
+def get_gain_schedule(t):
+    """
+    時刻 t における「進み幅（スケジュール上の）」[秒] を返す．
+
+    Args:
+        t: 時刻．time.time() で取得できるものと同じフォーマットとする．
+
+    Returns:
+        (float) 進み幅 [秒]．
+    """
+    t += TIMEZONE # ローカル時刻に修正．
+    day, sec_in_day = int(t / 86400), t % 86400
+    delta_of_day = get_random_delta_of_day(day)
+    coef = get_schedule_in_day(sec_in_day / 86400)
+    print("delta_of_day ==", delta_of_day)
+    print("coef ==", coef)
+    return delta_of_day * coef
 
 
 class NTPException(Exception):
@@ -114,12 +211,13 @@ class NTP:
     }
     """leap indicator table"""
 
+
 class NTPPacket:
     """NTP packet class.
 
     This represents an NTP packet.
     """
-    
+
     _PACKET_FORMAT = "!B B B b 11I"
     """packet format to pack/unpack"""
 
@@ -161,7 +259,7 @@ class NTPPacket:
         self.tx_timestamp_high = 0
         self.tx_timestamp_low = 0
         """tansmit timestamp"""
-        
+
     def to_data(self):
         """Convert this NTPPacket to a buffer that can be sent over a socket.
 
@@ -170,6 +268,15 @@ class NTPPacket:
 
         Raises:
         NTPException -- in case of invalid field
+        """
+
+        """
+        print("======== ntp packet which will be sent to client ========")
+        print("ref:     ", self.ref_timestamp)
+        print("orig:    ", _to_time(self.orig_timestamp_high, self.orig_timestamp_low))
+        print("receive: ", self.recv_timestamp)
+        print("transmit:", self.tx_timestamp)
+        print("=========================================================")
         """
         try:
             packed = struct.pack(NTPPacket._PACKET_FORMAT,
@@ -183,7 +290,7 @@ class NTPPacket:
                 self.ref_id,
                 _to_int(self.ref_timestamp),
                 _to_frac(self.ref_timestamp),
-                #Change by lichen, avoid loss of precision
+                # Change by lichen, avoid loss of precision
                 self.orig_timestamp_high,
                 self.orig_timestamp_low,
                 _to_int(self.recv_timestamp),
@@ -216,8 +323,8 @@ class NTPPacket:
         self.stratum = unpacked[1]
         self.poll = unpacked[2]
         self.precision = unpacked[3]
-        self.root_delay = float(unpacked[4])/2**16
-        self.root_dispersion = float(unpacked[5])/2**16
+        self.root_delay = float(unpacked[4]) / 2**16
+        self.root_dispersion = float(unpacked[5]) / 2**16
         self.ref_id = unpacked[6]
         self.ref_timestamp = _to_time(unpacked[7], unpacked[8])
         self.orig_timestamp = _to_time(unpacked[9], unpacked[10])
@@ -227,6 +334,14 @@ class NTPPacket:
         self.tx_timestamp = _to_time(unpacked[13], unpacked[14])
         self.tx_timestamp_high = unpacked[13]
         self.tx_timestamp_low = unpacked[14]
+        """
+        print("======== ntp packet from client ========")
+        print("ref:     ", self.ref_timestamp)
+        print("orig:    ", self.orig_timestamp)
+        print("receive: ", self.recv_timestamp)
+        print("transmit:", self.tx_timestamp)
+        print("========================================")
+        """
 
     def GetTxTimeStamp(self):
         return (self.tx_timestamp_high,self.tx_timestamp_low)
@@ -234,45 +349,50 @@ class NTPPacket:
     def SetOriginTimeStamp(self,high,low):
         self.orig_timestamp_high = high
         self.orig_timestamp_low = low
-        
+
 
 class RecvThread(threading.Thread):
     def __init__(self,socket):
         threading.Thread.__init__(self)
         self.socket = socket
+
     def run(self):
         global taskQueue,stopFlag
         while True:
-            if stopFlag == True:
-                print "RecvThread Ended"
+            if stopFlag:
+                print("RecvThread Ended")
                 break
-            rlist,wlist,elist = select.select([self.socket],[],[],1);
+            rlist, wlist, elist = select.select([self.socket], [], [], 1)
             if len(rlist) != 0:
-                print "Received %d packets" % len(rlist)
+                print("Received %d packets" % len(rlist))
                 for tempSocket in rlist:
                     try:
-                        data,addr = tempSocket.recvfrom(1024)
-                        recvTimestamp = recvTimestamp = system_to_ntp_time(time.time())
-                        taskQueue.put((data,addr,recvTimestamp))
-                    except socket.error,msg:
-                        print msg;
+                        data, addr = tempSocket.recvfrom(1024)
+                        current_time = get_accurate_current_time()
+                        if current_time is not None:
+                            recvTimestamp = recvTimestamp = system_to_ntp_time(current_time)
+                            taskQueue.put((data, addr, recvTimestamp))
+                    except socket.error as msg:
+                        print(msg)
+
 
 class WorkThread(threading.Thread):
     def __init__(self,socket):
         threading.Thread.__init__(self)
         self.socket = socket
+
     def run(self):
-        global taskQueue,stopFlag
+        global taskQueue, stopFlag
         while True:
-            if stopFlag == True:
-                print "WorkThread Ended"
+            if stopFlag:
+                print("WorkThread Ended")
                 break
             try:
-                data,addr,recvTimestamp = taskQueue.get(timeout=1)
+                data, addr, recvTimestamp = taskQueue.get(timeout=1)
                 recvPacket = NTPPacket()
                 recvPacket.from_data(data)
-                timeStamp_high,timeStamp_low = recvPacket.GetTxTimeStamp()
-                sendPacket = NTPPacket(version=3,mode=4)
+                timeStamp_high, timeStamp_low = recvPacket.GetTxTimeStamp()
+                sendPacket = NTPPacket(version=3, mode=4)
                 sendPacket.stratum = 2
                 sendPacket.poll = 10
                 '''
@@ -284,10 +404,21 @@ class WorkThread(threading.Thread):
                 sendPacket.ref_timestamp = recvTimestamp-5
                 sendPacket.SetOriginTimeStamp(timeStamp_high,timeStamp_low)
                 sendPacket.recv_timestamp = recvTimestamp
-                sendPacket.tx_timestamp = system_to_ntp_time(time.time())
-                socket.sendto(sendPacket.to_data(),addr)
-                print "Sended to %s:%d" % (addr[0],addr[1])
-            except Queue.Empty:
+
+                current_time = get_accurate_current_time()
+
+                if current_time is not None:
+                    sendPacket.tx_timestamp = system_to_ntp_time(current_time)
+                    
+                    # 送るパケットに含まれる時刻情報を，gain 秒だけ進める．
+                    gain = get_gain_schedule(current_time)
+                    sendPacket.recv_timestamp += gain
+                    sendPacket.tx_timestamp += gain
+
+                    socket.sendto(sendPacket.to_data(),addr)
+                    print("Sended to %s:%d" % (addr[0],addr[1]))
+                    print()
+            except queue.Empty:
                 continue
                 
         
@@ -295,7 +426,7 @@ listenIp = "0.0.0.0"
 listenPort = 123
 socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 socket.bind((listenIp,listenPort))
-print "local socket: ", socket.getsockname();
+print("local socket: ", socket.getsockname())
 recvThread = RecvThread(socket)
 recvThread.start()
 workThread = WorkThread(socket)
@@ -305,11 +436,11 @@ while True:
     try:
         time.sleep(0.5)
     except KeyboardInterrupt:
-        print "Exiting..."
+        print("Exiting...")
         stopFlag = True
         recvThread.join()
         workThread.join()
         #socket.close()
-        print "Exited"
+        print("Exited")
         break
         
