@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import queue
 import select
@@ -11,25 +12,39 @@ import ntplib
 
 import numpy as np
 
+parser = argparse.ArgumentParser(
+    description="NTP server with a small random gain")
+
+
+parser.add_argument("-s", "--server", default="",
+                    help="NTP server for fetching accurate time")
+parser.add_argument("-t", "--timezone", default=9 * 3600,
+                    help="timezone in seconds")
+parser.add_argument("-m", "--meandelta", default=5 * 60,
+                    help="mean delta time")
+parser.add_argument("-M", "--maxdelta", default=30 * 60,
+                    help="mean delta time")
+
+args = parser.parse_args()
 
 """
 「正確な時刻」を取得するための NTP サーバー．
 ローカルでサーバーとクライアントを両方動かす場合のみ指定が必要．
 さもなくば，空文字列で良い（その場合はシステムの時計を参照する．）
 """
-NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = "" 
+NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = args.server
 # NTP_SERVER_FOR_ACCURATE_CURRENT_TIME = "europe.pool.ntp.org"
 
 """
 タイムゾーン（GMT からのずれ[秒]）．（ランダム時計の日内スケジューリングにのみ影響）
 """
-TIMEZONE = +9 * 3600
+TIMEZONE = args.timezone
 
 """
 「本日のランダム進み幅」の平均値[秒]．
 """
-MEAN_DELTA = 5 * 60
-MAX_DELTA = 30 * 60
+MEAN_DELTA = args.meandelta
+MAX_DELTA = args.maxdelta
 assert(MEAN_DELTA < MAX_DELTA)
 
 
