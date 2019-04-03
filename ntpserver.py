@@ -50,8 +50,10 @@ TIMEZONE = float(args.timezone)
 MEAN_DELTA = float(args.meandelta)
 MAX_DELTA = float(args.maxdelta)
 assert(0 <= MEAN_DELTA <= MAX_DELTA)
-FORCE_DELTA = float(args.forcedelta) if args.forcedelta is not None else None
-assert(0 <= FORCE_DELTA)
+FORCE_DELTA = None
+if args.forcedelta is not None:
+    FORCE_DELTA = float(args.forcedelta)
+    assert(0 <= FORCE_DELTA)
 
 taskQueue = queue.Queue()
 stopFlag = False
