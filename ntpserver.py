@@ -17,13 +17,17 @@ parser = argparse.ArgumentParser(
 
 
 parser.add_argument("-s", "--server", default="",
-                    help="NTP server for fetching accurate time. Default: ''. (Example: 'europe.pool.ntp.org')")
+                    help=("NTP server for fetching accurate time. "
+                          "Default: '' (using system clock). "
+                          "(Example: 'europe.pool.ntp.org')"))
 parser.add_argument("-t", "--timezone", default=9 * 3600,
                     help="Timezone in seconds. Default: 9 * 3600")
 parser.add_argument("-m", "--meandelta", default=5 * 60,
                     help="Mean delta time. Default: 5 * 60")
 parser.add_argument("-M", "--maxdelta", default=30 * 60,
                     help="Max delta time. Default: 30 * 60")
+parser.add_argument("-F", "--forcedelta",
+                    help="Force all-time constant delta time. (for debugging)")
 
 args = parser.parse_args()
 
@@ -45,8 +49,9 @@ TIMEZONE = float(args.timezone)
 """
 MEAN_DELTA = float(args.meandelta)
 MAX_DELTA = float(args.maxdelta)
-assert(MEAN_DELTA < MAX_DELTA)
-
+assert(0 <= MEAN_DELTA <= MAX_DELTA)
+FORCE_DELTA = float(args.forcedelta) if args.forcedelta is not None else None
+assert(0 <= FORCE_DELTA)
 
 taskQueue = queue.Queue()
 stopFlag = False
@@ -130,7 +135,7 @@ def get_random_delta_of_day(seed):
     if np.random.rand() < 0.5:
         while 1:
             x = -np.log(np.random.rand()) * MEAN_DELTA
-            if x < MAX_DELTA:
+            if x <= MAX_DELTA:
                 break
         return x
     else:
@@ -162,6 +167,8 @@ def get_gain_schedule(t):
     Returns:
         (float) 進み幅 [秒]．
     """
+    if FORCE_DELTA is not None:
+        return FORCE_DELTA
     t += TIMEZONE # ローカル時刻に修正．
     day, sec_in_day = int(t / 86400), t % 86400
     delta_of_day = get_random_delta_of_day(day)
