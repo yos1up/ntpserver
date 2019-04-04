@@ -388,7 +388,7 @@ class RecvThread(threading.Thread):
                 break
             rlist, wlist, elist = select.select([self.socket], [], [], 1)
             if len(rlist) != 0:
-                print("Received %d packets" % len(rlist))
+                print("[{}] Received {} packets".format(datetime.datetime.now(), len(rlist)))
                 for tempSocket in rlist:
                     try:
                         data, addr = tempSocket.recvfrom(1024)
