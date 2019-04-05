@@ -338,7 +338,20 @@ class NTPPacket:
         try:
             unpacked = struct.unpack(NTPPacket._PACKET_FORMAT,
                     data[0:struct.calcsize(NTPPacket._PACKET_FORMAT)])
+
+            raise struct.error
         except struct.error:
+            import os
+            os.makedirs('./invalid_packets', exist_ok=True)
+            filename = './invalid_packets/{}'.format(
+                str(datetime.datetime.now())
+                .replace(' ', '-')
+                .replace(':', '-')
+                .replace('.', '-')
+                )
+            with open(filename, 'wb') as f:
+                f.write(data)
+            print("Invalid NTP packet (saved to file {})".format(filename))
             raise NTPException("Invalid NTP packet.")
 
         self.leap = unpacked[0] >> 6 & 0x3
@@ -443,6 +456,8 @@ class WorkThread(threading.Thread):
                     print("Sended to %s:%d" % (addr[0],addr[1]))
                     print()
             except queue.Empty:
+                continue
+            except NTPException:
                 continue
                 
         
