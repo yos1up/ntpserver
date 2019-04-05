@@ -339,7 +339,6 @@ class NTPPacket:
             unpacked = struct.unpack(NTPPacket._PACKET_FORMAT,
                     data[0:struct.calcsize(NTPPacket._PACKET_FORMAT)])
 
-            raise struct.error
         except struct.error:
             import os
             os.makedirs('./invalid_packets', exist_ok=True)
