@@ -21,9 +21,9 @@ parser.add_argument("-s", "--server", default="",
                           "Default: '' (using system clock). "
                           "(Example: 'europe.pool.ntp.org')"))
 parser.add_argument("-t", "--timezone", default=9 * 3600,
-                    help="Timezone in seconds. Default: 9 * 3600")
-parser.add_argument("-m", "--meandelta", default=5 * 60,
-                    help="Mean delta time. Default: 5 * 60")
+                    help="Timezone in seconds. Default: 9 * 3600.")
+parser.add_argument("-m", "--meandelta", default=3 * 60,
+                    help="Mean delta time. Default: 3 * 60")
 parser.add_argument("-M", "--maxdelta", default=30 * 60,
                     help="Max delta time. Default: 30 * 60")
 parser.add_argument("-F", "--forcedelta",
@@ -112,7 +112,8 @@ def _to_time(integ, frac, n=32):
 
 def get_accurate_current_time():
     """
-    正しい現在時刻を取得する．これは信頼できる時刻で，time.time() で取得できるものと同じフォーマットとする．
+    正しい現在時刻を取得する．
+    これは信頼できる時刻で，time.time() で取得できるものと同じフォーマットとする．
     """
     if NTP_SERVER_FOR_ACCURATE_CURRENT_TIME == "":
         return time.time()
@@ -134,19 +135,16 @@ def get_random_delta_of_day(seed):
     「進み幅分布」からランダムに進み幅をサンプルする．
     """
     np.random.seed(seed)
-    if np.random.rand() < 0.5:
-        while 1:
-            x = -np.log(np.random.rand()) * MEAN_DELTA
-            if x <= MAX_DELTA:
-                break
-        return x
-    else:
-        return 0
+    while 1:
+        x = -np.log(np.random.rand()) * 0.5 * MEAN_DELTA + 0.5 * MEAN_DELTA
+        if x <= MAX_DELTA:
+            break
+    return x
 
 
 def get_schedule_in_day(time_ratio_in_day):
     """
-    日内スケジュール．
+    日内スケジュール
     """
     x = time_ratio_in_day
     if x < 0.25:
